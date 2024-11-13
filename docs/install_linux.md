@@ -118,6 +118,18 @@ sudo zypper update gh
 
 The GitHub CLI team does not maintain the following packages or repositories and thus we are unable to provide support for those installation methods.
 
+### Go
+
+If go is installed on your machine:
+
+```
+$ go install github.com/cli/cli/v2/cmd/gh@latest
+$ ls ~/go/bin/
+$ ~/go/bin/gh
+# update $PATH accordingly
+```
+
+
 ### Snap (do not use)
 
 There are [so many issues with Snap](https://github.com/casperdcl/cli/issues/7) as a runtime mechanism for apps like GitHub CLI that our team suggests _never installing gh as a snap_.
