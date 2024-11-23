@@ -70,7 +70,7 @@ type ProjectDescription struct {
 }
 
 // input format: "<title>[\n[\n][<body>]"
-func newProjectDescription(description string) ProjectDescription {
+func NewProjectDescription(description string) ProjectDescription {
 	parts := strings.SplitN(description, "\n", 2)
 
 	result := ProjectDescription{
