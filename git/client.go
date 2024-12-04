@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -276,6 +278,55 @@ func (c *Client) Config(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	return firstLine(out), nil
+}
+
+func (c *Client) Templates(ctx context.Context) (string, error) {
+	// https://git-scm.com/docs/git-init/2.2.3
+	// The template directory will be one of the following (in order):
+	// - the argument given with the --template option;
+	// (This can't be determined at this point)
+
+	// - the contents of the $GIT_TEMPLATE_DIR environment variable;
+	if envDir := os.Getenv("GIT_TEMPLATE_DIR"); envDir != "" {
+		return envDir, nil
+	}
+
+	// - the init.templatedir configuration variable; or
+	templateDir, err := c.Config(ctx, "init.templatedir")
+	if err == nil && templateDir != "" {
+		return templateDir, nil
+	}
+
+	// - the default template directory: /usr/share/git-core/templates.
+	command, err := c.Command(ctx, "--exec-path")
+	if err != nil {
+		return "", err
+	}
+	execPath, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	defaultTemplateDir := filepath.Join(strings.TrimSpace(string(execPath)), "templates")
+	if _, err := os.Stat(defaultTemplateDir); err == nil {
+		return defaultTemplateDir, nil
+	}
+
+	return "", fmt.Errorf("could not determine git template directory")
+}
+
+func (c *Client) Template(ctx context.Context, filename string) (string, error) {
+	templateDir, err := c.Templates(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	templatePath := filepath.Join(templateDir, filename)
+	content, err := os.ReadFile(templatePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read template file %s: %w", templatePath, err)
+	}
+
+	return string(content), nil
 }
 
 func (c *Client) UncommittedChangeCount(ctx context.Context) (int, error) {

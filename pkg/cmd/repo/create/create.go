@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -733,6 +734,38 @@ func sourceInit(gitClient *git.Client, io *iostreams.IOStreams, remoteURL, baseR
 		fmt.Fprintf(io.Out, "%s Added remote %s\n", cs.SuccessIcon(), remoteURL)
 	}
 	return nil
+}
+
+// gitDir/description file, treated as "<name>\n[\n][<description>]"
+func gitProjectDescription(gitClient *git.Client) (*git.ProjectDescription, error) {
+	// get the git directory
+	gitDir, err := gitClient.GitDir(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	// read the description file
+	descriptionPath := filepath.Join(gitDir, "description")
+	rawContent, err := os.ReadFile(descriptionPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	content := string(rawContent)
+
+	// check if it's changed from the default
+	template := ""
+	template, err = gitClient.Template(context.Background(), "description")
+	if err != nil {
+		return nil, err
+	}
+	if content == template {
+		return nil, nil
+	}
+
+	return git.NewProjectDescription(content), nil
 }
 
 // check if local repository has committed changes

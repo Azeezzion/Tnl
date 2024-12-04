@@ -64,6 +64,34 @@ func (r TrackingRef) String() string {
 	return "refs/remotes/" + r.RemoteName + "/" + r.BranchName
 }
 
+type ProjectDescription struct {
+	Title string
+	Body  string
+}
+
+// input format: "<title>[\n[\n][<body>]"
+func NewProjectDescription(description string) *ProjectDescription {
+	parts := strings.SplitN(description, "\n", 2)
+
+	result := &ProjectDescription{
+		Title: parts[0],
+		Body:  "",
+	}
+	if len(parts) > 1 {
+		result.Body = strings.TrimPrefix(parts[1], "\n") // remove optional leading newline
+	}
+
+	return result
+}
+
+// output format: "<title>[\n\n<body>]"
+func (p ProjectDescription) String() string {
+	if p.Body != "" {
+		return p.Title + "\n\n" + p.Body
+	}
+	return p.Title
+}
+
 type Commit struct {
 	Sha   string
 	Title string
