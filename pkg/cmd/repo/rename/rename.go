@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
@@ -32,6 +34,7 @@ type RenameOptions struct {
 	DoConfirm       bool
 	HasRepoOverride bool
 	newRepoSelector string
+	RenameLocalDir  bool
 }
 
 func NewCmdRename(f *cmdutil.Factory, runf func(*RenameOptions) error) *cobra.Command {
@@ -82,6 +85,7 @@ func NewCmdRename(f *cmdutil.Factory, runf func(*RenameOptions) error) *cobra.Co
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip confirmation prompt")
 	_ = cmd.Flags().MarkDeprecated("confirm", "use `--yes` instead")
 	cmd.Flags().BoolVarP(&confirm, "yes", "y", false, "Skip the confirmation prompt")
+	cmd.Flags().BoolVarP(&opts.RenameLocalDir, "rename-dir", "N", false, "Rename the directory of the local repository to match the new repo name")
 
 	return cmd
 }
@@ -104,16 +108,46 @@ func renameRun(opts *RenameOptions) error {
 			"Rename %s to:", ghrepo.FullName(currRepo)), ""); err != nil {
 			return err
 		}
+
+		if !opts.RenameLocalDir {
+			var confirmed bool
+			if confirmed, err = opts.Prompter.Confirm("Would you also like to rename the local directory to the same name?", false); err != nil {
+				return err
+			}
+			if confirmed {
+				opts.RenameLocalDir = true
+			}
+		}
 	}
 
 	if opts.DoConfirm {
+		confirmMessage := "Rename %s to %s"
+		if opts.RenameLocalDir {
+			confirmMessage += " and the local directory name"
+		}
+		confirmMessage += "?"
+
 		var confirmed bool
 		if confirmed, err = opts.Prompter.Confirm(fmt.Sprintf(
-			"Rename %s to %s?", ghrepo.FullName(currRepo), newRepoName), false); err != nil {
+			confirmMessage, ghrepo.FullName(currRepo), newRepoName), false); err != nil {
 			return err
 		}
 		if !confirmed {
 			return nil
+		}
+	}
+
+	var repoDir string
+	if repoDir, err = opts.GitClient.ToplevelDir(context.Background()); err != nil {
+		return err
+	}
+	if opts.RenameLocalDir {
+		var exists bool
+		if exists, err = newRepoDirExists(repoDir, newRepoName); err != nil {
+			return err
+		}
+		if exists {
+			return fmt.Errorf("failed to rename local repository because the folder exists. Please choose another name")
 		}
 	}
 
@@ -124,9 +158,22 @@ func renameRun(opts *RenameOptions) error {
 		return err
 	}
 
+	var renamedLocalDir bool
+	if opts.RenameLocalDir {
+		if err = renameRepoDir(repoDir, newRepoName); err == nil {
+			renamedLocalDir = true
+		} else {
+			fmt.Fprintf(opts.IO.ErrOut, "Failed to rename local directory: %v\n", err)
+		}
+	}
+
 	cs := opts.IO.ColorScheme()
 	if opts.IO.IsStdoutTTY() {
-		fmt.Fprintf(opts.IO.Out, "%s Renamed repository %s\n", cs.SuccessIcon(), ghrepo.FullName(newRepo))
+		if renamedLocalDir {
+			fmt.Fprintf(opts.IO.Out, "%s Renamed repository %s and local directory\n", cs.SuccessIcon(), ghrepo.FullName(newRepo))
+		} else {
+			fmt.Fprintf(opts.IO.Out, "%s Renamed repository %s\n", cs.SuccessIcon(), ghrepo.FullName(newRepo))
+		}
 	}
 
 	if opts.HasRepoOverride {
@@ -169,4 +216,30 @@ func updateRemote(repo ghrepo.Interface, renamed ghrepo.Interface, opts *RenameO
 	err = opts.GitClient.UpdateRemoteURL(context.Background(), remote.Name, remoteURL)
 
 	return remote, err
+}
+
+func renameRepoDir(repoDir string, newRepoName string) (err error) {
+	newPath := filepath.Join(filepath.Dir(repoDir), newRepoName)
+	if err = os.Rename(repoDir, newPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func newRepoDirExists(repoDir string, newRepoName string) (bool, error) {
+	newPath := filepath.Join(filepath.Dir(repoDir), newRepoName)
+
+	if newPath == repoDir {
+		return false, nil
+	}
+
+	info, err := os.Stat(newPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		} else {
+			return false, err
+		}
+	}
+	return info.IsDir(), nil
 }
