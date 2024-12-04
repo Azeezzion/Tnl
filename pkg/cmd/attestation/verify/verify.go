@@ -242,7 +242,8 @@ func runVerify(opts *Options) error {
 	}
 	attestations = filteredAttestations
 
-	opts.Logger.VerbosePrintf("Verifying attestations with predicate type: %s\n", ec.PredicateType)
+	// print information about the policy that will be enforced against attestations
+	opts.Logger.Println(ec.BuildPolicyInformation())
 
 	verified, errMsg, err := verifyAttestations(*artifact, attestations, opts.SigstoreVerifier, ec)
 	if err != nil {
@@ -250,7 +251,7 @@ func runVerify(opts *Options) error {
 		return err
 	}
 
-	opts.Logger.Println(opts.Logger.ColorScheme.Green("✓ Verification succeeded!\n"))
+	opts.Logger.Println(opts.Logger.ColorScheme.Green("\n✓ Verification succeeded!\n"))
 
 	// If an exporter is provided with the --json flag, write the results to the terminal in JSON format
 	if opts.exporter != nil {
