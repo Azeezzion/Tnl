@@ -14,6 +14,7 @@ import (
 	"github.com/cli/cli/v2/internal/config"
 	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/prompter"
 	"github.com/cli/cli/v2/internal/run"
 	"github.com/cli/cli/v2/pkg/cmd/pr/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
@@ -63,10 +64,13 @@ func stubPR(repo, prHead string) (ghrepo.Interface, *api.PullRequest) {
 
 func Test_checkoutRun(t *testing.T) {
 	tests := []struct {
-		name       string
-		opts       *CheckoutOptions
-		httpStubs  func(*httpmock.Registry)
-		runStubs   func(*run.CommandStubber)
+		name string
+		opts *CheckoutOptions
+
+		httpStubs   func(*httpmock.Registry)
+		runStubs    func(*run.CommandStubber)
+		promptStubs func(*prompter.MockPrompter)
+
 		remotes    map[string]string
 		wantStdout string
 		wantStderr string
@@ -81,6 +85,10 @@ func Test_checkoutRun(t *testing.T) {
 					finder := shared.NewMockFinder("123", pr, baseRepo)
 					return finder
 				}(),
+				BaseRepo: func() (ghrepo.Interface, error) {
+					baseRepo, _ := stubPR("OWNER/REPO:master", "OWNER/REPO:feature")
+					return baseRepo, nil
+				},
 				Config: func() (gh.Config, error) {
 					return config.NewBlankConfig(), nil
 				},
@@ -108,6 +116,10 @@ func Test_checkoutRun(t *testing.T) {
 					finder := shared.NewMockFinder("123", pr, baseRepo)
 					return finder
 				}(),
+				BaseRepo: func() (ghrepo.Interface, error) {
+					baseRepo, _ := stubPR("OWNER/REPO:master", "OWNER/REPO:feature")
+					return baseRepo, nil
+				},
 				Config: func() (gh.Config, error) {
 					return config.NewBlankConfig(), nil
 				},
@@ -137,6 +149,10 @@ func Test_checkoutRun(t *testing.T) {
 					finder := shared.NewMockFinder("123", pr, baseRepo)
 					return finder
 				}(),
+				BaseRepo: func() (ghrepo.Interface, error) {
+					baseRepo, _ := stubPR("OWNER/REPO:master", "OWNER/REPO:feature")
+					return baseRepo, nil
+				},
 				Config: func() (gh.Config, error) {
 					return config.NewBlankConfig(), nil
 				},
@@ -164,6 +180,10 @@ func Test_checkoutRun(t *testing.T) {
 					finder := shared.NewMockFinder("123", pr, baseRepo)
 					return finder
 				}(),
+				BaseRepo: func() (ghrepo.Interface, error) {
+					baseRepo, _ := stubPR("OWNER/REPO:master", "hubot/REPO:feature")
+					return baseRepo, nil
+				},
 				Config: func() (gh.Config, error) {
 					return config.NewBlankConfig(), nil
 				},
@@ -183,12 +203,64 @@ func Test_checkoutRun(t *testing.T) {
 				cs.Register(`git config branch\.foobar\.merge refs/heads/feature`, 0, "")
 			},
 		},
+		{
+			name: "with no selected PR args and not stdin tty, return error",
+			opts: &CheckoutOptions{
+				SelectorArg: "",
+				Interactive: false,
+				BaseRepo: func() (ghrepo.Interface, error) {
+					return ghrepo.New("OWNER", "REPO"), nil
+				},
+			},
+			remotes: map[string]string{
+				"origin": "OWNER/REPO",
+			},
+			wantErr: true,
+		},
+		{
+			name: "with no selected PR args and stdin tty, prompts for choice",
+			opts: &CheckoutOptions{
+				SelectorArg: "",
+				Interactive: true,
+				Finder: func() shared.PRFinder {
+					baseRepo, pr := stubPR("OWNER/REPO:master", "OWNER/REPO:feature")
+					finder := shared.NewMockFinder("123", pr, baseRepo)
+					return finder
+				}(),
+				BaseRepo: func() (ghrepo.Interface, error) {
+					return ghrepo.New("OWNER", "REPO"), nil
+				},
+				Config: func() (gh.Config, error) {
+					return config.NewBlankConfig(), nil
+				},
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				reg.Register(httpmock.GraphQL(`query PullRequestList\b`), httpmock.FileResponse("./fixtures/prList.json"))
+			},
+			promptStubs: func(pm *prompter.MockPrompter) {
+				pm.RegisterSelect("Select a pull request",
+					[]string{"#32 New feature (feature)", "#29 Fixed bad bug (bug-fix)", "#28 Improve documentation (docs)"},
+					func(_, _ string, opts []string) (int, error) {
+						return prompter.IndexFor(opts, "#32 New feature (feature)")
+					})
+			},
+			runStubs: func(cs *run.CommandStubber) {
+				cs.Register(`git show-ref --verify -- refs/heads/feature`, 1, "")
+				cs.Register(`git remote get-url origin`, 0, "https://github.com/hubot/REPO.git")
+				cs.Register(`git fetch origin \+refs/heads/feature:refs/remotes/origin/feature`, 0, "")
+				cs.Register(`git checkout -b feature --track origin/feature`, 0, "")
+			},
+			remotes: map[string]string{
+				"origin": "OWNER/REPO",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := tt.opts
 
 			ios, _, stdout, stderr := iostreams.Test()
+
 			opts.IO = ios
 			httpReg := &httpmock.Registry{}
 			defer httpReg.Verify(t)
@@ -203,6 +275,12 @@ func Test_checkoutRun(t *testing.T) {
 			defer cmdTeardown(t)
 			if tt.runStubs != nil {
 				tt.runStubs(cmdStubs)
+			}
+
+			pm := prompter.NewMockPrompter(t)
+			tt.opts.Prompter = pm
+			if tt.promptStubs != nil {
+				tt.promptStubs(pm)
 			}
 
 			opts.Remotes = func() (context.Remotes, error) {
@@ -240,7 +318,7 @@ func Test_checkoutRun(t *testing.T) {
 
 /** LEGACY TESTS **/
 
-func runCommand(rt http.RoundTripper, remotes context.Remotes, branch string, cli string) (*test.CmdOut, error) {
+func runCommand(rt http.RoundTripper, remotes context.Remotes, branch string, cli string, baseRepo ghrepo.Interface) (*test.CmdOut, error) {
 	ios, _, stdout, stderr := iostreams.Test()
 
 	factory := &cmdutil.Factory{
@@ -268,6 +346,9 @@ func runCommand(rt http.RoundTripper, remotes context.Remotes, branch string, cl
 		GitClient: &git.Client{
 			GhPath:  "some/path/gh",
 			GitPath: "some/path/git",
+		},
+		BaseRepo: func() (ghrepo.Interface, error) {
+			return baseRepo, nil
 		},
 	}
 
@@ -305,7 +386,7 @@ func TestPRCheckout_sameRepo(t *testing.T) {
 	cs.Register(`git show-ref --verify -- refs/heads/feature`, 1, "")
 	cs.Register(`git checkout -b feature --track origin/feature`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123`)
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -325,7 +406,7 @@ func TestPRCheckout_existingBranch(t *testing.T) {
 	cs.Register(`git checkout feature`, 0, "")
 	cs.Register(`git merge --ff-only refs/remotes/origin/feature`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123`)
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -356,7 +437,7 @@ func TestPRCheckout_differentRepo_remoteExists(t *testing.T) {
 	cs.Register(`git show-ref --verify -- refs/heads/feature`, 1, "")
 	cs.Register(`git checkout -b feature --track robot-fork/feature`, 0, "")
 
-	output, err := runCommand(http, remotes, "master", `123`)
+	output, err := runCommand(http, remotes, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -379,7 +460,7 @@ func TestPRCheckout_differentRepo(t *testing.T) {
 	cs.Register(`git config branch\.feature\.pushRemote origin`, 0, "")
 	cs.Register(`git config branch\.feature\.merge refs/pull/123/head`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123`)
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -398,7 +479,7 @@ func TestPRCheckout_differentRepo_existingBranch(t *testing.T) {
 	cs.Register(`git config branch\.feature\.merge`, 0, "refs/heads/feature\n")
 	cs.Register(`git checkout feature`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123`)
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -417,7 +498,7 @@ func TestPRCheckout_detachedHead(t *testing.T) {
 	cs.Register(`git config branch\.feature\.merge`, 0, "refs/heads/feature\n")
 	cs.Register(`git checkout feature`, 0, "")
 
-	output, err := runCommand(http, nil, "", `123`)
+	output, err := runCommand(http, nil, "", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -436,7 +517,7 @@ func TestPRCheckout_differentRepo_currentBranch(t *testing.T) {
 	cs.Register(`git config branch\.feature\.merge`, 0, "refs/heads/feature\n")
 	cs.Register(`git merge --ff-only FETCH_HEAD`, 0, "")
 
-	output, err := runCommand(http, nil, "feature", `123`)
+	output, err := runCommand(http, nil, "feature", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -451,7 +532,9 @@ func TestPRCheckout_differentRepo_invalidBranchName(t *testing.T) {
 
 	_, cmdTeardown := run.Stub()
 	defer cmdTeardown(t)
-	output, err := runCommand(http, nil, "master", `123`)
+
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
+
 	assert.EqualError(t, err, `invalid branch name: "-foo"`)
 	assert.Equal(t, "", output.Stderr())
 	assert.Equal(t, "", output.Stderr())
@@ -474,7 +557,7 @@ func TestPRCheckout_maintainerCanModify(t *testing.T) {
 	cs.Register(`git config branch\.feature\.pushRemote https://github\.com/hubot/REPO\.git`, 0, "")
 	cs.Register(`git config branch\.feature\.merge refs/heads/feature`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123`)
+	output, err := runCommand(http, nil, "master", `123`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -495,7 +578,7 @@ func TestPRCheckout_recurseSubmodules(t *testing.T) {
 	cs.Register(`git submodule sync --recursive`, 0, "")
 	cs.Register(`git submodule update --init --recursive`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123 --recurse-submodules`)
+	output, err := runCommand(http, nil, "master", `123 --recurse-submodules`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
@@ -514,7 +597,7 @@ func TestPRCheckout_force(t *testing.T) {
 	cs.Register(`git checkout feature`, 0, "")
 	cs.Register(`git reset --hard refs/remotes/origin/feature`, 0, "")
 
-	output, err := runCommand(http, nil, "master", `123 --force`)
+	output, err := runCommand(http, nil, "master", `123 --force`, baseRepo)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
@@ -533,7 +616,7 @@ func TestPRCheckout_detach(t *testing.T) {
 	cs.Register(`git checkout --detach FETCH_HEAD`, 0, "")
 	cs.Register(`git fetch origin refs/pull/123/head`, 0, "")
 
-	output, err := runCommand(http, nil, "", `123 --detach`)
+	output, err := runCommand(http, nil, "", `123 --detach`, baseRepo)
 	assert.NoError(t, err)
 	assert.Equal(t, "", output.String())
 	assert.Equal(t, "", output.Stderr())
