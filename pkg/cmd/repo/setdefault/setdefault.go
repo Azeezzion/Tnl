@@ -78,14 +78,6 @@ func NewCmdSetDefault(f *cmdutil.Factory, runF func(*SetDefaultOptions) error) *
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				var err error
-				opts.Repo, err = ghrepo.FromFullName(args[0])
-				if err != nil {
-					return err
-				}
-			}
-
 			if !opts.ViewMode && !opts.IO.CanPrompt() && opts.Repo == nil {
 				return cmdutil.FlagErrorf("repository required when not running interactively")
 			}
@@ -94,6 +86,14 @@ func NewCmdSetDefault(f *cmdutil.Factory, runF func(*SetDefaultOptions) error) *
 				return err
 			} else if !isLocal {
 				return errors.New("must be run from inside a git repository")
+			}
+
+			if len(args) > 0 {
+				var err error
+				opts.Repo, err = parseRepo(args[0], opts)
+				if err != nil {
+					return err
+				}
 			}
 
 			if runF != nil {
@@ -251,4 +251,23 @@ func displayRemoteRepoName(remote *context.Remote) string {
 	}
 
 	return ghrepo.FullName(repo)
+}
+
+func parseRepo(name string, opts *SetDefaultOptions) (ghrepo.Interface, error) {
+	if repo, err := ghrepo.FromFullName(name); err == nil {
+		return repo, nil
+	}
+
+	remotes, err := opts.Remotes()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, remote := range remotes {
+		if remote.Name == name {
+			return remote.Repo, nil
+		}
+	}
+
+	return nil, fmt.Errorf(`expected the "[HOST/]OWNER/REPO" format or a remote name, got %q`, name)
 }
