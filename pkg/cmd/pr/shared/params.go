@@ -160,7 +160,7 @@ func AddMetadataToIssueParams(client *api.Client, baseRepo ghrepo.Interface, par
 
 type FilterOptions struct {
 	Assignee   string
-	Author     string
+	Author     []string
 	BaseBranch string
 	Draft      *bool
 	Entity     string
@@ -184,7 +184,7 @@ func (opts *FilterOptions) IsDefault() bool {
 	if opts.Assignee != "" {
 		return false
 	}
-	if opts.Author != "" {
+	if len(opts.Author) > 0 {
 		return false
 	}
 	if opts.BaseBranch != "" {
