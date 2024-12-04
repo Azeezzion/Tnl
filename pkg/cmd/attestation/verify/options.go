@@ -5,42 +5,32 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghinstance"
-	"github.com/cli/cli/v2/pkg/cmd/attestation/api"
-	"github.com/cli/cli/v2/pkg/cmd/attestation/artifact/oci"
-	"github.com/cli/cli/v2/pkg/cmd/attestation/io"
-	"github.com/cli/cli/v2/pkg/cmd/attestation/verification"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 )
 
 // Options captures the options for the verify command
 type Options struct {
-	ArtifactPath          string
-	BundlePath            string
-	UseBundleFromRegistry bool
-	Config                func() (gh.Config, error)
-	TrustedRoot           string
-	DenySelfHostedRunner  bool
-	DigestAlgorithm       string
-	Limit                 int
-	NoPublicGood          bool
-	OIDCIssuer            string
-	Owner                 string
-	PredicateType         string
-	Repo                  string
-	SAN                   string
-	SANRegex              string
-	SignerRepo            string
-	SignerWorkflow        string
-	APIClient             api.Client
-	Logger                *io.Handler
-	OCIClient             oci.Client
-	SigstoreVerifier      verification.SigstoreVerifier
-	exporter              cmdutil.Exporter
-	Hostname              string
+	ArtifactPath         string
+	BundlePath           string
+	DenySelfHostedRunner bool
+	DigestAlgorithm      string
+	exporter             cmdutil.Exporter
+	Hostname             string
+	Limit                int
+	NoPublicGood         bool
+	OIDCIssuer           string
+	Owner                string
+	PredicateType        string
+	Repo                 string
+	SAN                  string
+	SANRegex             string
+	SignerRepo           string
+	SignerWorkflow       string
 	// Tenant is only set when tenancy is used
-	Tenant string
+	Tenant                string
+	TrustedRoot           string
+	UseBundleFromRegistry bool
 }
 
 // Clean cleans the file path option values
