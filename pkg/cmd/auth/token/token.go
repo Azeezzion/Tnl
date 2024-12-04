@@ -31,6 +31,8 @@ func NewCmdToken(f *cmdutil.Factory, runF func(*TokenOptions) error) *cobra.Comm
 		Long: heredoc.Docf(`
 			This command outputs the authentication token for an account on a given GitHub host.
 
+   			The token can be stored in your computers keyring for security.
+
 			Without the %[1]s--hostname%[1]s flag, the default host is chosen.
 
 			Without the %[1]s--user%[1]s flag, the active account for the host is chosen.
